@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Identity;
+using TaskFlow.Application.Authentication.Commands;
 using TaskFlow.Infrastructure;
 using TaskFlow.Infrastructure.Persistence;
 
@@ -20,6 +21,12 @@ builder.Services.AddCors(options =>
     });
 });
 
+builder.Services.AddMediatR(configuration =>
+{
+    configuration.RegisterServicesFromAssembly(
+        typeof(RegisterCommand).Assembly);
+});
+
 var app = builder.Build();
 
 if (app.Environment.IsDevelopment())
@@ -31,6 +38,7 @@ app.UseHttpsRedirection();
 
 app.UseCors("TaskFlowFrontend");
 
+app.UseAuthentication();
 app.UseAuthorization();
 
 using (var scope = app.Services.CreateScope())
