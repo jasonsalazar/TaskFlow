@@ -5,4 +5,7 @@ public sealed record IdentityAuthResult(
     Guid? UserId,
     string? Email,
     string? AccessToken,
+    string? RefreshToken,
+    DateTime? AccessTokenExpiresAtUtc,
+    DateTime? RefreshTokenExpiresAtUtc,
     IReadOnlyList<string> Errors);

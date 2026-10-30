@@ -1,17 +1,25 @@
 using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.Options;
 using TaskFlow.Application.Authentication;
 using TaskFlow.Application.Common.Interfaces;
+using TaskFlow.Domain.Authentication;
 
 namespace TaskFlow.Infrastructure.Identity;
 
 public sealed class IdentityAuthService(
     UserManager<ApplicationUser> userManager,
     SignInManager<ApplicationUser> signInManager,
-    IJwtTokenService jwtTokenService) : IIdentityAuthService
+    IJwtTokenService jwtTokenService,
+    IRefreshTokenRepository refreshTokenRepository,
+    IRefreshTokenService refreshTokenService,
+    IOptions<JwtOptions> jwtOptions) : IIdentityAuthService
 {
     private readonly UserManager<ApplicationUser> _userManager = userManager;
     private readonly SignInManager<ApplicationUser> _signInManager = signInManager;
     private readonly IJwtTokenService _jwtTokenService = jwtTokenService;
+    private readonly IRefreshTokenRepository _refreshTokenRepository = refreshTokenRepository;
+    private readonly IRefreshTokenService _refreshTokenService = refreshTokenService;
+    private readonly JwtOptions _jwtOptions = jwtOptions.Value;
 
     public async Task<IdentityAuthResult> RegisterAsync(
         string firstName,
@@ -28,7 +36,7 @@ public sealed class IdentityAuthService(
         if (existingUser is not null)
         {
             return new IdentityAuthResult(
-                false, null, null, null,
+                false, null, null, null, null, null, null,
                 ["An account with this email already exists."]);
         }
 
@@ -48,10 +56,7 @@ public sealed class IdentityAuthService(
         if (!createResult.Succeeded)
         {
             return new IdentityAuthResult(
-                false,
-                null,
-                null,
-                null,
+                false, null, null, null, null, null, null,
                 [.. createResult.Errors.Select(error => error.Description)]);
         }
 
@@ -65,17 +70,11 @@ public sealed class IdentityAuthService(
             await _userManager.DeleteAsync(user);
 
             return new IdentityAuthResult(
-                false, null, null, null,
+                false, null, null, null, null, null, null,
                 ["The account could not be initialized."]);
         }
 
-        var token = await _jwtTokenService.GenerateAccessTokenAsync(
-            user.Id,
-            user.Email!,
-            cancellationToken);
-
-        return new IdentityAuthResult(
-            true, user.Id, user.Email, token, []);
+        return await CreateSessionAsync(user, cancellationToken);
     }
 
     public async Task<IdentityAuthResult> LoginAsync(
@@ -101,19 +100,48 @@ public sealed class IdentityAuthService(
             return InvalidCredentials();
         }
 
-        var token = await _jwtTokenService.GenerateAccessTokenAsync(
+        return await CreateSessionAsync(user, cancellationToken);
+    }
+
+    private async Task<IdentityAuthResult> CreateSessionAsync(
+    ApplicationUser user,
+    CancellationToken cancellationToken)
+    {
+        var now = DateTime.UtcNow;
+        var accessToken = await _jwtTokenService
+            .GenerateAccessTokenAsync(user.Id, user.Email!);
+
+        var rawRefreshToken = _refreshTokenService.GenerateToken();
+        var refreshTokenHash = _refreshTokenService
+            .HashToken(rawRefreshToken);
+
+        var refreshTokenExpiresAtUtc =
+            now.AddDays(_jwtOptions.RefreshTokenDays);
+
+        var refreshToken = new RefreshToken(
             user.Id,
-            user.Email!,
+            refreshTokenHash,
+            refreshTokenExpiresAtUtc);
+
+        await _refreshTokenRepository.AddAsync(
+            refreshToken,
             cancellationToken);
 
         return new IdentityAuthResult(
-            true, user.Id, user.Email, token, []);
+            true,
+            user.Id,
+            user.Email,
+            accessToken,
+            rawRefreshToken,
+            now.AddMinutes(_jwtOptions.AccessTokenMinutes),
+            refreshTokenExpiresAtUtc,
+            []);
     }
 
     private static IdentityAuthResult InvalidCredentials()
     {
         return new IdentityAuthResult(
-            false, null, null, null,
+            false, null, null, null, null, null, null,
             ["Invalid email or password."]);
     }
 }
