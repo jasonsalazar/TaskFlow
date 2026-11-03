@@ -1,4 +1,5 @@
 using MediatR;
+using TaskFlow.Application.Authentication.DTOs;
 
 namespace TaskFlow.Application.Authentication.Commands;
 
@@ -8,8 +9,3 @@ public sealed record RegisterCommand(
     string Email,
     string Password
 ) : IRequest<AuthenticationResponse>;
-
-public sealed record AuthenticationResponse(
-    Guid UserId,
-    string Email,
-    string AccessToken);

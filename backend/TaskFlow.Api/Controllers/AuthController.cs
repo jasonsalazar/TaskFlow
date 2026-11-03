@@ -1,8 +1,8 @@
-using System.ComponentModel.DataAnnotations;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using TaskFlow.Application.Authentication.Commands;
+using TaskFlow.Application.Authentication.DTOs;
 
 namespace TaskFlow.Api.Controllers;
 
@@ -28,7 +28,13 @@ public sealed class AuthController(ISender sender) : ControllerBase
                     request.Password),
                 cancellationToken);
 
-            return Ok(response);
+            SetRefreshCookie(response.RefreshToken, response.RefreshTokenExpiresAtUtc);
+
+            return Ok(new AccessTokenResponse(
+                response.UserId,
+                response.Email,
+                response.AccessToken,
+                response.AccessTokenExpiresAtUtc));
         }
         catch (AuthenticationValidationException ex)
         {
@@ -48,31 +54,117 @@ public sealed class AuthController(ISender sender) : ControllerBase
                 new LoginCommand(request.Email, request.Password),
                 cancellationToken);
 
-            return Ok(response);
+            SetRefreshCookie(response.RefreshToken, response.RefreshTokenExpiresAtUtc);
+
+            return Ok(new AccessTokenResponse(
+                response.UserId,
+                response.Email,
+                response.AccessToken,
+                response.AccessTokenExpiresAtUtc));
         }
         catch (AuthenticationValidationException ex)
         {
             return Unauthorized(new { errors = ex.Errors });
         }
     }
+
+    private const string RefreshCookieName = "taskflow.refresh";
+
+    private void SetRefreshCookie(
+        string token,
+        DateTime expiresAtUtc)
+    {
+        Response.Cookies.Append(
+            RefreshCookieName,
+            token,
+            new CookieOptions
+            {
+                HttpOnly = true,
+                Secure = true,
+                SameSite = SameSiteMode.Lax,
+                Expires = new DateTimeOffset(
+                    DateTime.SpecifyKind(
+                        expiresAtUtc, DateTimeKind.Utc)),
+                Path = "/api/auth",
+                IsEssential = true,
+            });
+    }
+
+    private void ClearRefreshCookie()
+    {
+        Response.Cookies.Delete(
+            RefreshCookieName,
+            new CookieOptions
+            {
+                HttpOnly = true,
+                Secure = true,
+                SameSite = SameSiteMode.Lax,
+                Path = "/api/auth"
+            });
+    }
+
+    [AllowAnonymous]
+    [HttpPost("refresh")]
+    public async Task<IActionResult> Refresh(
+        CancellationToken cancellationToken)
+    {
+        if (!Request.Cookies.TryGetValue(
+                RefreshCookieName, out var refreshToken) ||
+            string.IsNullOrWhiteSpace(refreshToken))
+        {
+            return Unauthorized(new
+            {
+                message = "A valid refresh session is required."
+            });
+        }
+
+        var result = await _sender.Send(
+            new RefreshTokenCommand(refreshToken),
+            cancellationToken);
+
+        if (!result.Succeeded ||
+            result.AccessToken is null ||
+            result.RefreshToken is null ||
+            result.UserId is null ||
+            result.Email is null ||
+            result.AccessTokenExpiresAtUtc is null ||
+            result.RefreshTokenExpiresAtUtc is null)
+        {
+            ClearRefreshCookie();
+
+            return Unauthorized(new
+            {
+                message = "The refresh session is invalid or expired."
+            });
+        }
+
+        SetRefreshCookie(
+            result.RefreshToken,
+            result.RefreshTokenExpiresAtUtc.Value);
+
+        return Ok(new AccessTokenResponse(
+            result.UserId.Value,
+            result.Email,
+            result.AccessToken,
+            result.AccessTokenExpiresAtUtc.Value));
+    }
+
+    [AllowAnonymous]
+    [HttpPost("logout")]
+    public async Task<IActionResult> Logout(
+        CancellationToken cancellationToken)
+    {
+        if (Request.Cookies.TryGetValue(
+                RefreshCookieName, out var refreshToken) &&
+            !string.IsNullOrWhiteSpace(refreshToken))
+        {
+            await _sender.Send(
+                new LogoutCommand(refreshToken),
+                cancellationToken);
+        }
+
+        ClearRefreshCookie();
+
+        return NoContent();
+    }
 }
-
-public sealed record RegisterRequest(
-    [Required, StringLength(100, MinimumLength = 1)]
-    string FirstName,
-
-    [Required, StringLength(100, MinimumLength = 1)]
-    string LastName,
-
-    [Required, EmailAddress, StringLength(256)]
-    string Email,
-
-    [Required, StringLength(128, MinimumLength = 8)]
-    string Password);
-
-public sealed record LoginRequest(
-    [Required, EmailAddress, StringLength(256)]
-    string Email,
-
-    [Required]
-    string Password);

@@ -94,6 +94,7 @@ public static class DependencyInjection
         services.AddScoped<IIdentityAuthService, IdentityAuthService>();
         services.AddScoped<IRefreshTokenService, RefreshTokenService>();
         services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
+        services.AddScoped<IRefreshSessionService, RefreshSessionService>();
 
         return services;
     }
