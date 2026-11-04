@@ -15,7 +15,7 @@ builder.Services.AddCors(options =>
     options.AddPolicy("TaskFlowFrontend", policy =>
     {
         policy
-            .WithOrigins("http://localhost:3000")
+            .WithOrigins("https://localhost:3000")
             .AllowAnyHeader()
             .AllowAnyMethod()
             .AllowCredentials();
