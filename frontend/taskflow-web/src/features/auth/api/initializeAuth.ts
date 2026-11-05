@@ -4,6 +4,12 @@ import { useAuthStore } from "../../../stores/authStore";
 export async function initializeAuth() {
   const store = useAuthStore.getState();
 
+  const location = window.location.pathname;
+  if (location === "/login" || location === "/register") {
+    store.setInitialized(true);
+    return;
+  }
+
   try {
     const response = await authApi.refresh();
 
